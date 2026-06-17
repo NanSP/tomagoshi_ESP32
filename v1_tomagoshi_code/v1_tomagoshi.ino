@@ -677,7 +677,7 @@ void setup() {
   tft.initR(INITR_BLACKTAB);
 
   // Paisagem: 160x128
-  tft.setRotation(1);
+  tft.setRotation(3);
 
   tft.fillScreen(COR_FUNDO);
 
