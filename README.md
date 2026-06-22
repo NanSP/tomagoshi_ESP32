@@ -48,6 +48,7 @@ Instale as bibliotecas acima pela Biblioteca do Arduino IDE ou via PlatformIO.
 **Licença**
 
 - Nenhuma licença especificada; adicione um arquivo LICENSE se desejar definir termos de uso.
+- Give a star!
 
 **Próximos passos sugeridos**
 
