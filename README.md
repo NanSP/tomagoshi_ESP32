@@ -10,7 +10,7 @@ Projeto Tamagoshi para placas ESP32: firmware para display ST7735 128x160, contr
 **Estrutura do repositório**
 
 - `v1_tomagoshi_code/`: código-fonte Arduino/ESP32 (arquivo principal: `v1_tomagoshi.ino`).
-- `tomagoshi_3D_layout/`: modelos 3D e G-code para impressão (arquivos .3mf e .gcode).
+- `tomagoshi_3D_layout/`: modelos 3D para impressão (arquivos .3mf).
 
 **Arquivo principal**
 
@@ -43,7 +43,7 @@ Instale as bibliotecas acima pela Biblioteca do Arduino IDE ou via PlatformIO.
 
 **Modelos 3D / Impressão**
 
-- Verifique a pasta `tomagoshi_3D_layout/` para arquivos .3mf e um G-code pronto (`v2.tomagoshiRobot_PLA_1h33m.gcode`). Ajuste configurações de impressão conforme sua impressora.
+- Verifique a pasta `tomagoshi_3D_layout/` para os arquivos .3mf: `v3.tomagoshiRobotAssets.3mf` e `v3.tomagoshiRobotBody.3mf`. Ajuste configurações de impressão conforme sua impressora.
 
 **Licença**
 
