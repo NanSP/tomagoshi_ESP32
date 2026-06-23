@@ -56,6 +56,16 @@ Instale as bibliotecas acima pela Biblioteca do Arduino IDE ou via PlatformIO.
 - Documentar versão de bibliotecas/testes e criar um `hardware.md` com fotos de montagem.
 - Adicionar um arquivo `LICENSE` e issues/README para contribuições.
 
+**Mídia (fotos e vídeos)**
+
+- Adicionei imagens e vídeos à pasta `pics/` para documentação e referência:
+  - [pics/tomagoshi_circuit_map_display.jpg](pics/tomagoshi_circuit_map_display.jpg) — Foto do mapa do display.
+  - [pics/tomagoshi_circuit.mp4](pics/tomagoshi_circuit.mp4) — Vídeo do circuito.
+  - [pics/tomagoshi_test.mp4](pics/tomagoshi_test.mp4) — Vídeo de teste do firmware.
+  - [pics/tomagoshi_V3.mp4](pics/tomagoshi_V3.mp4) — Vídeo do modelo V3 / montagem 3D.
+
+Use esses arquivos para ilustrar montagem, conectar o hardware e demonstrar o firmware em ação.
+
 ---
 
 Arquivo atualizado automaticamente pelo assistente.
