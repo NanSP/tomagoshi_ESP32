@@ -101,6 +101,3 @@ Os arquivos em [pics](pics) servem como referência de montagem, conexão e test
 - Criar um documento adicional de montagem com fotos e instruções mais detalhadas.
 - Adicionar um arquivo de licença e um guia de contribuição.
 
-## Licença
-
-Ainda não há um arquivo de licença definido neste repositório. Se quiser, pode adicionar um arquivo LICENSE para formalizar o uso e a distribuição do projeto.
