@@ -99,5 +99,4 @@ Os arquivos em [pics](pics) servem como referência de montagem, conexão e test
 - Validar o esquema de ligação com o protótipo físico real.
 - Documentar a versão exata das bibliotecas e o resultado de testes.
 - Criar um documento adicional de montagem com fotos e instruções mais detalhadas.
-- Adicionar um arquivo de licença e um guia de contribuição.
-
+- Modificar alimentação do protótipo, para uma alimentação pro pilhas AA
