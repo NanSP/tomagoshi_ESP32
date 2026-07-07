@@ -50,6 +50,7 @@ O código atual usa os seguintes pinos:
 - `pinoBotaoNavegar`: 15 (entrada com `INPUT_PULLUP`)
 - `pinoBotaoSelect`: 33 (entrada com `INPUT_PULLUP`)
 - `pinoBuzzer`: 32 (saída)
+- `Display`: confira nas fotos no repositorio
 
 > Ajuste o mapeamento se o seu hardware usar outro layout de conexão.
 
