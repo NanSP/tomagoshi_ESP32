@@ -94,8 +94,8 @@ Os arquivos em [pics](pics) servem como referência de montagem, conexão e test
 - [pics/tomagoshi_circuit.mp4](pics/tomagoshi_circuit.mp4): vídeo do circuito.
 - [pics/tomagoshi_test.mp4](pics/tomagoshi_test.mp4): vídeo de teste do firmware.
 - [pics/tomagoshi_V3.mp4](pics/tomagoshi_V3.mp4): vídeo do modelo V3 e montagem 3D.
+- https://www.canva.com/design/DAHOcaQGx0w/KYEWCjvO_eI0vH9hz0ybug/view?utm_content=DAHOcaQGx0w&utm_campaign=designshare&utm_medium=link&utm_source=viewer
 
 ## Próximos passos sugeridos
 
-- Validar o esquema de ligação com o protótipo físico real.
 - Modificar alimentação do protótipo, para uma alimentação pro pilhas AA
