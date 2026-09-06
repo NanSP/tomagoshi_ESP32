@@ -103,3 +103,4 @@ Os arquivos em [pics](pics) servem como referência de montagem, conexão e test
 - Customização 3D(acessorios, chapeus)
 - Confeccionar mais protótipos
 - Novo corpo capaz de abrigar as baterias 
+- Produção de novos robôs 
