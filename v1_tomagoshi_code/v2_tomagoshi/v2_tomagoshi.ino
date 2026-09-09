@@ -35,6 +35,7 @@ struct TamagotchiState {
 #define MODE_TAMAGOTCHI 0
 #define MODE_GAME       1
 #define MODE_MENU       2
+#define MODE_GAME_SELECT 3
 
 int currentMode = MODE_TAMAGOTCHI;
 
@@ -43,6 +44,15 @@ int menuOpcao = 0;
 int lastMenuOpcao = -1;
 const int totalOpcoes = 4;
 bool menuInitialized = false;
+
+#define GAME_JUMP 0
+#define GAME_SHIP 1
+
+int currentGame = GAME_JUMP;
+int gameMenuOpcao = 0;
+int lastGameMenuOpcao = -1;
+const int totalGames = 2;
+bool gameMenuInitialized = false;
 
 // Status
 int energia = 100;
@@ -95,11 +105,64 @@ int last_game_speed = 2;
 int last_score = -1;
 float last_player_y = GROUND_Y - PLAYER_SIZE;
 
+// ================= JOGO 2: NAVE =================
+#define SHIP_WIDTH 10
+#define SHIP_HEIGHT 6
+#define SHIP_Y (SCREEN_HEIGHT - 10)
+#define SHIP_SPEED 3
+
+#define MAX_ENEMIES 4
+#define MAX_BULLETS 4
+#define ENEMY_WIDTH 8
+#define ENEMY_HEIGHT 6
+#define BULLET_WIDTH 2
+#define BULLET_HEIGHT 4
+
+struct Enemy
+{
+    int x, y;
+    int lastX, lastY;
+    bool active;
+    bool wasDrawn;
+};
+
+struct Bullet
+{
+    int x, y;
+    int lastX, lastY;
+    bool active;
+    bool wasDrawn;
+};
+
+Enemy enemies[MAX_ENEMIES];
+Bullet bullets[MAX_BULLETS];
+
+int ship_x = SCREEN_WIDTH / 2 - SHIP_WIDTH / 2;
+int last_ship_x = ship_x;
+
+int ship_score = 0;
+int last_ship_score = -1;
+int high_score_ship = 0;
+
+unsigned long lastEnemySpawn = 0;
+long enemySpawnInterval = 1100;
+unsigned long lastAutoFire = 0;
+const long autoFireInterval = 450;
+int ship_enemy_speed = 2;
+
+// Recorde separado para preservar o formato original dos dados do Tamagotchi.
+struct ShipRecord {
+  int high_score;
+  byte magicByte;
+};
+
 // ================= EEPROM =================
 
 void saveData() {
   TamagotchiState state = { energia, felicidade, fome, high_score, 0xAD };
   EEPROM.put(0, state);
+  ShipRecord shipRecord = { high_score_ship, 0xB1 };
+  EEPROM.put(sizeof(TamagotchiState), shipRecord);
   EEPROM.commit();
 }
 
@@ -121,6 +184,11 @@ void loadData() {
     high_score = 0;
     saveData();
   }
+
+  ShipRecord shipRecord;
+  EEPROM.get(sizeof(TamagotchiState), shipRecord);
+  high_score_ship = (shipRecord.magicByte == 0xB1 && shipRecord.high_score >= 0)
+                      ? shipRecord.high_score : 0;
 
   lastEnergia = energia;
   lastFelicidade = felicidade;
@@ -450,6 +518,7 @@ void handleAlimentar();
 void handleDormir();
 void handleCurar();
 void game_reset();
+void ship_game_reset();
 
 void menu_loop() {
   drawMenu();
@@ -475,8 +544,8 @@ void menu_loop() {
         break;
 
       case 1:
-        game_reset();
-        currentMode = MODE_GAME;
+        gameMenuInitialized = false;
+        currentMode = MODE_GAME_SELECT;
         break;
 
       case 2:
@@ -490,6 +559,112 @@ void menu_loop() {
         break;
     }
   }
+}
+
+void drawGameMenuItem(int index, bool selected)
+{
+    int x = 20 + (index * 80);
+    int y = 30;
+    int w = 50, h = 50;
+
+    tft.fillRect(x - 3, y - 3, w + 6, h + 20, COR_FUNDO);
+
+    if (selected)
+    {
+        tft.drawRect(x - 2, y - 2, w + 4, h + 4, ST7735_YELLOW);
+    }
+    else
+    {
+        tft.drawRect(x, y, w, h, COR_TEXTO);
+    }
+
+    if (index == 0)
+    {
+        // icone: quadrado pulando
+        tft.fillRect(x + 19, y + 30, 12, 12, ST7735_GREEN);
+        tft.drawLine(x + 25, y + 10, x + 25, y + 27, COR_TEXTO);
+        tft.drawLine(x + 21, y + 14, x + 25, y + 10, COR_TEXTO);
+        tft.drawLine(x + 29, y + 14, x + 25, y + 10, COR_TEXTO);
+    }
+    else
+    {
+        // icone: nave
+        tft.fillTriangle(x + 25, y + 10, x + 12, y + 37, x + 37, y + 37, ST7735_CYAN);
+        tft.fillRect(x + 22, y + 37, 6, 5, ST7735_CYAN);
+    }
+
+    const char *nomes[] = {"PULO", "NAVE"};
+    tft.setTextSize(1);
+    tft.setTextColor(COR_TEXTO, COR_FUNDO);
+    tft.setCursor(x + 13, y + h + 4);
+    tft.print(nomes[index]);
+}
+
+void drawGameSelectMenu()
+{
+    if (!gameMenuInitialized)
+    {
+        tft.fillScreen(COR_FUNDO);
+
+        tft.setTextSize(1);
+        tft.setTextColor(ST7735_CYAN, COR_FUNDO);
+        tft.setCursor(41, 7);
+        tft.print("ESCOLHA O JOGO");
+
+        for (int i = 0; i < totalGames; i++)
+        {
+            drawGameMenuItem(i, false);
+        }
+
+        gameMenuInitialized = true;
+        lastGameMenuOpcao = -1;
+    }
+
+    if (lastGameMenuOpcao != gameMenuOpcao)
+    {
+        if (lastGameMenuOpcao >= 0)
+        {
+            drawGameMenuItem(lastGameMenuOpcao, false);
+        }
+
+        drawGameMenuItem(gameMenuOpcao, true);
+        lastGameMenuOpcao = gameMenuOpcao;
+    }
+}
+
+void game_select_loop()
+{
+    drawGameSelectMenu();
+
+    unsigned long currentMillis = millis();
+
+    if (digitalRead(pinoBotaoNavegar) == LOW && currentMillis - lastInputTime > inputCooldown)
+    {
+        lastInputTime = currentMillis;
+        gameMenuOpcao = (gameMenuOpcao + 1) % totalGames;
+        play_tone(440, 50);
+    }
+
+    if (digitalRead(pinoBotaoSelect) == LOW && currentMillis - lastInputTime > inputCooldown)
+    {
+        lastInputTime = currentMillis;
+        play_tone(880, 100);
+
+        gameMenuInitialized = false;
+
+        if (gameMenuOpcao == 0)
+        {
+            currentGame = GAME_JUMP;
+            game_reset();
+        }
+        else
+        {
+            currentGame = GAME_SHIP;
+            ship_game_reset();
+        }
+
+        currentMode = MODE_GAME;
+    }
 }
 
 // ================= JOGO =================
@@ -625,6 +800,280 @@ void game_loop() {
 
 // ================= AÇÕES =================
 
+// ================= JOGO 2: NAVE =================
+
+void ship_game_reset()
+{
+    play_tone(600, 100);
+
+    ship_score = 0;
+    last_ship_score = -1;
+
+    ship_x = SCREEN_WIDTH / 2 - SHIP_WIDTH / 2;
+    last_ship_x = ship_x;
+
+    ship_enemy_speed = 2;
+    enemySpawnInterval = 1100;
+
+    for (int i = 0; i < MAX_ENEMIES; i++)
+    {
+        enemies[i].active = false;
+        enemies[i].wasDrawn = false;
+    }
+
+    for (int i = 0; i < MAX_BULLETS; i++)
+    {
+        bullets[i].active = false;
+        bullets[i].wasDrawn = false;
+    }
+
+    lastEnemySpawn = millis();
+    lastAutoFire = millis();
+
+    tft.fillScreen(COR_FUNDO);
+}
+
+void ship_game_over()
+{
+    play_tone(200, 500);
+
+    tft.fillScreen(COR_FUNDO);
+
+    tft.setTextSize(1);
+    tft.setTextColor(ST7735_RED, COR_FUNDO);
+    tft.setTextSize(2);
+    tft.setCursor(26, 32);
+    tft.print("GAME OVER");
+
+    tft.setTextSize(1);
+    tft.setTextColor(COR_TEXTO, COR_FUNDO);
+    tft.setCursor(52, 57);
+    tft.print("Score: ");
+    tft.print(ship_score);
+
+    if (ship_score > high_score_ship)
+    {
+        high_score_ship = ship_score;
+        saveData();
+
+        tft.setCursor(41, 77);
+        tft.setTextColor(ST7735_YELLOW, COR_FUNDO);
+        tft.print("NOVO RECORDE!");
+    }
+
+    delay(2500);
+
+    currentMode = MODE_TAMAGOTCHI;
+    fullRedraw();
+}
+
+void updateShipDisplay()
+{
+    // nave
+    if (last_ship_x != ship_x)
+    {
+        tft.fillRect(last_ship_x, SHIP_Y, SHIP_WIDTH, SHIP_HEIGHT, COR_FUNDO);
+    }
+
+    tft.fillTriangle(ship_x + SHIP_WIDTH / 2, SHIP_Y,
+                     ship_x, SHIP_Y + SHIP_HEIGHT - 1,
+                     ship_x + SHIP_WIDTH - 1, SHIP_Y + SHIP_HEIGHT - 1,
+                     ST7735_CYAN);
+
+    last_ship_x = ship_x;
+
+    // balas
+    for (int i = 0; i < MAX_BULLETS; i++)
+    {
+        if (bullets[i].wasDrawn)
+        {
+            tft.fillRect(bullets[i].lastX, bullets[i].lastY, BULLET_WIDTH, BULLET_HEIGHT, COR_FUNDO);
+        }
+
+        if (bullets[i].active)
+        {
+            tft.fillRect(bullets[i].x, bullets[i].y, BULLET_WIDTH, BULLET_HEIGHT, ST7735_YELLOW);
+            bullets[i].lastX = bullets[i].x;
+            bullets[i].lastY = bullets[i].y;
+            bullets[i].wasDrawn = true;
+        }
+        else
+        {
+            bullets[i].wasDrawn = false;
+        }
+    }
+
+    // inimigos
+    for (int i = 0; i < MAX_ENEMIES; i++)
+    {
+        if (enemies[i].wasDrawn)
+        {
+            tft.fillRect(enemies[i].lastX, enemies[i].lastY, ENEMY_WIDTH, ENEMY_HEIGHT, COR_FUNDO);
+        }
+
+        if (enemies[i].active)
+        {
+            tft.fillRect(enemies[i].x, enemies[i].y, ENEMY_WIDTH, ENEMY_HEIGHT, ST7735_RED);
+            enemies[i].lastX = enemies[i].x;
+            enemies[i].lastY = enemies[i].y;
+            enemies[i].wasDrawn = true;
+        }
+        else
+        {
+            enemies[i].wasDrawn = false;
+        }
+    }
+
+    // score
+    if (ship_score != last_ship_score)
+    {
+        tft.fillRect(4, 4, 75, 11, COR_FUNDO);
+        tft.setTextSize(1);
+        tft.setTextColor(COR_TEXTO, COR_FUNDO);
+        tft.setCursor(4, 4);
+        tft.print("Score: ");
+        tft.print(ship_score);
+        last_ship_score = ship_score;
+    }
+}
+
+void ship_game_loop()
+{
+    unsigned long currentMillis = millis();
+    static unsigned long lastShipUpdate = 0;
+
+    if (currentMillis - lastShipUpdate < 30)
+    {
+        return;
+    }
+
+    lastShipUpdate = currentMillis;
+
+    // movimento da nave (esquerda/direita)
+    if (digitalRead(pinoBotaoNavegar) == LOW)
+    {
+        ship_x -= SHIP_SPEED;
+    }
+    if (digitalRead(pinoBotaoSelect) == LOW)
+    {
+        ship_x += SHIP_SPEED;
+    }
+
+    if (ship_x < 0)
+        ship_x = 0;
+    if (ship_x > SCREEN_WIDTH - SHIP_WIDTH)
+        ship_x = SCREEN_WIDTH - SHIP_WIDTH;
+
+    // tiro automático
+    if (currentMillis - lastAutoFire >= autoFireInterval)
+    {
+        lastAutoFire = currentMillis;
+
+        for (int i = 0; i < MAX_BULLETS; i++)
+        {
+            if (!bullets[i].active)
+            {
+                bullets[i].active = true;
+                bullets[i].x = ship_x + SHIP_WIDTH / 2 - BULLET_WIDTH / 2;
+                bullets[i].y = SHIP_Y - BULLET_HEIGHT;
+                tone(pinoBuzzer, 900, 30);
+                break;
+            }
+        }
+    }
+
+    // move balas
+    for (int i = 0; i < MAX_BULLETS; i++)
+    {
+        if (bullets[i].active)
+        {
+            bullets[i].y -= 5;
+
+            if (bullets[i].y < 18)
+            {
+                bullets[i].active = false;
+            }
+        }
+    }
+
+    // spawn de inimigos
+    if (currentMillis - lastEnemySpawn >= enemySpawnInterval)
+    {
+        lastEnemySpawn = currentMillis;
+
+        for (int i = 0; i < MAX_ENEMIES; i++)
+        {
+            if (!enemies[i].active)
+            {
+                enemies[i].active = true;
+                enemies[i].x = random(0, SCREEN_WIDTH - ENEMY_WIDTH);
+                enemies[i].y = 18;
+                break;
+            }
+        }
+
+        if (enemySpawnInterval > 500)
+        {
+            enemySpawnInterval -= 20;
+        }
+    }
+
+    // move inimigos e checa colisão com a nave
+    for (int i = 0; i < MAX_ENEMIES; i++)
+    {
+        if (!enemies[i].active)
+            continue;
+
+        enemies[i].y += ship_enemy_speed;
+
+        if (enemies[i].y > SCREEN_HEIGHT)
+        {
+            enemies[i].active = false;
+            continue;
+        }
+
+        if (enemies[i].y + ENEMY_HEIGHT > SHIP_Y &&
+            enemies[i].x < ship_x + SHIP_WIDTH &&
+            enemies[i].x + ENEMY_WIDTH > ship_x)
+        {
+            ship_game_over();
+            return;
+        }
+    }
+
+    // colisão bala x inimigo
+    for (int i = 0; i < MAX_BULLETS; i++)
+    {
+        if (!bullets[i].active)
+            continue;
+
+        for (int j = 0; j < MAX_ENEMIES; j++)
+        {
+            if (!enemies[j].active)
+                continue;
+
+            if (bullets[i].x < enemies[j].x + ENEMY_WIDTH &&
+                bullets[i].x + BULLET_WIDTH > enemies[j].x &&
+                bullets[i].y < enemies[j].y + ENEMY_HEIGHT &&
+                bullets[i].y + BULLET_HEIGHT > enemies[j].y)
+            {
+                bullets[i].active = false;
+                enemies[j].active = false;
+                ship_score++;
+
+                tone(pinoBuzzer, 1200, 40);
+
+                if (ship_score % 5 == 0 && ship_enemy_speed < 4)
+                {
+                    ship_enemy_speed++;
+                }
+            }
+        }
+    }
+
+    updateShipDisplay();
+}
+
 void handleCurar() {
   if (energia < 50 || fome < 50 || felicidade < 50) {
     energia = 100;
@@ -677,7 +1126,7 @@ void setup() {
   tft.initR(INITR_BLACKTAB);
 
   // Paisagem: 160x128
-  tft.setRotation(3);
+  tft.setRotation(1);
 
   tft.fillScreen(COR_FUNDO);
 
@@ -780,7 +1229,15 @@ void loop() {
       break;
 
     case MODE_GAME:
-      game_loop();
+      if (currentGame == GAME_SHIP) {
+        ship_game_loop();
+      } else {
+        game_loop();
+      }
+      break;
+
+    case MODE_GAME_SELECT:
+      game_select_loop();
       break;
 
     case MODE_MENU:
