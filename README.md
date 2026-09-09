@@ -50,6 +50,7 @@ O código atual usa os seguintes pinos:
 - `pinoBotaoNavegar`: 15 (entrada com `INPUT_PULLUP`)
 - `pinoBotaoSelect`: 33 (entrada com `INPUT_PULLUP`)
 - `pinoBuzzer`: 32 (saída)
+- `Display`: confira nas fotos no repositorio
 
 > Ajuste o mapeamento se o seu hardware usar outro layout de conexão.
 
@@ -93,10 +94,13 @@ Os arquivos em [pics](pics) servem como referência de montagem, conexão e test
 - [pics/tomagoshi_circuit.mp4](pics/tomagoshi_circuit.mp4): vídeo do circuito.
 - [pics/tomagoshi_test.mp4](pics/tomagoshi_test.mp4): vídeo de teste do firmware.
 - [pics/tomagoshi_V3.mp4](pics/tomagoshi_V3.mp4): vídeo do modelo V3 e montagem 3D.
+- https://www.canva.com/design/DAHOcaQGx0w/KYEWCjvO_eI0vH9hz0ybug/view?utm_content=DAHOcaQGx0w&utm_campaign=designshare&utm_medium=link&utm_source=viewer
 
 ## Próximos passos sugeridos
 
-- Validar o esquema de ligação com o protótipo físico real.
-- Documentar a versão exata das bibliotecas e o resultado de testes.
-- Criar um documento adicional de montagem com fotos e instruções mais detalhadas.
-- Modificar alimentação do protótipo, para uma alimentação pro pilhas AA
+- Modificar alimentação do protótipo, para uma alimentação pro pilhas AA (CONCLUIDO)
+- Adicionar novos jogos(corrida, nave espacial)
+- Customização 3D(acessorios, chapeus)
+- Confeccionar mais protótipos
+- Novo corpo capaz de abrigar as baterias 
+- Produção de novos robôs 
