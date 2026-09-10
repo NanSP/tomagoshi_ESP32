@@ -99,7 +99,7 @@ Os arquivos em [pics](pics) servem como referência de montagem, conexão e test
 ## Próximos passos sugeridos
 
 - Modificar alimentação do protótipo, para uma alimentação pro pilhas AA (CONCLUIDO)
-- Adicionar novos jogos(corrida, nave espacial)
+- Adicionar novos jogos(corrida, nave espacial(CONCLUIDO))
 - Customização 3D(acessorios, chapeus)
 - Confeccionar mais protótipos
 - Novo corpo capaz de abrigar as baterias 
