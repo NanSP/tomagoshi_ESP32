@@ -2,6 +2,8 @@
 
 Projeto de um tamagotchi em estilo retrô para placas ESP32, com display ST7735 de 128x160 pixels, botões físicos, buzzer e persistência em EEPROM. O repositório reúne o firmware, os arquivos de montagem 3D e materiais visuais para documentação.
 
+O trabalho é parte do componente de avaliação da disciplina de Projeto de Extensão 
+
 ## O que existe neste projeto
 
 - Firmware para ESP32 em Arduino/ESP-IDF style com lógica de estados do mascote.
