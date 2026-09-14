@@ -104,5 +104,5 @@ Os arquivos em [pics](pics) servem como referência de montagem, conexão e test
 - Adicionar novos jogos(corrida, nave espacial(CONCLUIDO))
 - Customização 3D(acessorios, chapeus)
 - Confeccionar mais protótipos
-- Novo corpo capaz de abrigar as baterias 
+- Novo corpo capaz de abrigar as baterias (CONCLUIDO)
 - Produção de novos robôs 
