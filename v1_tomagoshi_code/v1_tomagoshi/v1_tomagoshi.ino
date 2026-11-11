@@ -32,6 +32,24 @@ struct TamagotchiState {
   byte magicByte;
 };
 
+struct StateIntegrity {
+  uint32_t magic;
+  uint32_t checksum;
+};
+
+const int integrityAddress = 64;
+const uint32_t integrityMagic = 0x54414D31UL;
+
+uint32_t stateChecksum(int energiaValue, int felicidadeValue, int fomeValue,
+                       int highScoreValue, byte magicValue) {
+  uint32_t hash = 2166136261UL;
+  const int values[] = { energiaValue, felicidadeValue, fomeValue, highScoreValue };
+  for (int i = 0; i < 4; i++) {
+    hash = (hash ^ (uint32_t)values[i]) * 16777619UL;
+  }
+  return (hash ^ magicValue) * 16777619UL;
+}
+
 #define MODE_TAMAGOTCHI 0
 #define MODE_GAME       1
 #define MODE_MENU       2
@@ -100,6 +118,9 @@ float last_player_y = GROUND_Y - PLAYER_SIZE;
 void saveData() {
   TamagotchiState state = { energia, felicidade, fome, high_score, 0xAD };
   EEPROM.put(0, state);
+  StateIntegrity integrity = { integrityMagic,
+    stateChecksum(state.energia, state.felicidade, state.fome, state.high_score, state.magicByte) };
+  EEPROM.put(integrityAddress, integrity);
   EEPROM.commit();
 }
 
@@ -109,11 +130,22 @@ void loadData() {
   TamagotchiState state;
   EEPROM.get(0, state);
 
-  if (state.magicByte == 0xAD) {
+  StateIntegrity integrity;
+  EEPROM.get(integrityAddress, integrity);
+  bool hasChecksum = integrity.magic == integrityMagic;
+
+  if (state.magicByte == 0xAD &&
+      state.energia >= 0 && state.energia <= 100 &&
+      state.felicidade >= 0 && state.felicidade <= 100 &&
+      state.fome >= 0 && state.fome <= 100 &&
+      state.high_score >= 0 &&
+      (!hasChecksum || integrity.checksum == stateChecksum(
+        state.energia, state.felicidade, state.fome, state.high_score, state.magicByte))) {
     energia = state.energia;
     felicidade = state.felicidade;
     fome = state.fome;
     high_score = state.high_score;
+    if (!hasChecksum) saveData();
   } else {
     energia = 100;
     felicidade = 100;
@@ -151,21 +183,21 @@ void drawStatusBar(int x, int y, const char* label, int valor) {
 
 void updateInterface() {
   if (energia != lastEnergia) {
-    tft.fillRect(13, 1, 35, 7, COR_FUNDO);
+    tft.fillRect(14, 2, 33, 5, COR_FUNDO);
     int largura = map(energia, 0, 100, 0, 33);
     tft.fillRect(14, 2, largura, 5, COR_BARRA);
     lastEnergia = energia;
   }
 
   if (felicidade != lastFelicidade) {
-    tft.fillRect(66, 1, 35, 7, COR_FUNDO);
+    tft.fillRect(67, 2, 33, 5, COR_FUNDO);
     int largura = map(felicidade, 0, 100, 0, 33);
     tft.fillRect(67, 2, largura, 5, COR_BARRA);
     lastFelicidade = felicidade;
   }
 
   if (fome != lastFome) {
-    tft.fillRect(119, 1, 35, 7, COR_FUNDO);
+    tft.fillRect(120, 2, 33, 5, COR_FUNDO);
     int largura = map(fome, 0, 100, 0, 33);
     tft.fillRect(120, 2, largura, 5, COR_BARRA);
     lastFome = fome;
@@ -189,6 +221,7 @@ void updateInterface() {
 // ================= PERSONAGEM =================
 
 unsigned long lastBlinkTime = 0;
+int displayedFace = -1; // 0: normal, 1: triste, 2: doente
 
 int eyeW = 40;
 int eyeH = 35;
@@ -199,7 +232,7 @@ int rightEyeX = 95;
 
 void drawEyes() {
 
-  tft.fillRect(0, 20, 160, 90, COR_FUNDO);
+  tft.fillRect(0, 20, 160, 96, COR_FUNDO);
 
   tft.fillRoundRect(leftEyeX, eyeY, eyeW, eyeH, 8, COR_TEXTO);
   tft.fillRoundRect(rightEyeX, eyeY, eyeW, eyeH, 8, COR_TEXTO);
@@ -228,6 +261,7 @@ void fullRedraw() {
   tft.print(gameMinute);
 
   drawCharacter();
+  displayedFace = 0;
 
   lastEnergia = energia;
   lastFelicidade = felicidade;
@@ -279,9 +313,9 @@ void drawHappyFace() {
 
 void drawSadFace() {
 
-  play_tone(200, 300);
+  tone(pinoBuzzer, 200, 300);
 
-  tft.fillRect(0, 20, 160, 90, COR_FUNDO);
+  tft.fillRect(0, 20, 160, 96, COR_FUNDO);
 
   // olhos inclinados
   tft.drawLine(30, 60, 60, 75, COR_TEXTO);
@@ -292,9 +326,6 @@ void drawSadFace() {
   tft.drawLine(75, 100, 85, 100, COR_TEXTO);
   tft.drawLine(85, 100, 100, 110, COR_TEXTO);
 
-  delay(1200);
-
-  fullRedraw();
 }
 
 // ==================================================
@@ -303,9 +334,9 @@ void drawSadFace() {
 
 void drawSickFace() {
 
-  play_tone(100, 500);
+  tone(pinoBuzzer, 100, 500);
 
-  tft.fillRect(0, 20, 160, 90, COR_FUNDO);
+  tft.fillRect(0, 20, 160, 96, COR_FUNDO);
 
   tft.setTextColor(ST7735_RED);
   tft.setTextSize(3);
@@ -321,11 +352,7 @@ void drawSickFace() {
   tft.drawLine(75, 95, 85, 105, ST7735_RED);
   tft.drawLine(85, 105, 95, 100, ST7735_RED);
 
-  delay(1500);
-
   tft.setTextColor(COR_TEXTO);
-
-  fullRedraw();
 }
 
 // ==================================================
@@ -714,37 +741,31 @@ void loop() {
   unsigned long currentMillis = millis();
 
   // Relógio interno
-  if (currentMillis - previousMillisClock >= 60000) {
-    previousMillisClock = currentMillis;
-
-    gameMinute++;
-
-    if (gameMinute >= 60) {
-      gameMinute = 0;
-      gameHour++;
-
-      if (gameHour >= 24) {
-        gameHour = 0;
-      }
-    }
+  unsigned long elapsedMinutes = (currentMillis - previousMillisClock) / 60000UL;
+  if (elapsedMinutes > 0) {
+    previousMillisClock += elapsedMinutes * 60000UL;
+    unsigned long minutesOfDay = (gameHour * 60UL + gameMinute + elapsedMinutes) % 1440UL;
+    gameHour = minutesOfDay / 60;
+    gameMinute = minutesOfDay % 60;
   }
 
   // Decaimento dos status
-  if (currentMillis - previousMillisStats >= intervalStats) {
-    previousMillisStats = currentMillis;
+  unsigned long elapsedStats = (currentMillis - previousMillisStats) / intervalStats;
+  if (elapsedStats > 0) {
+    previousMillisStats += elapsedStats * intervalStats;
 
     if (!estaDormindo) {
-      if (energia > 0) energia--;
-      if (felicidade > 0) felicidade--;
-      if (fome > 0) fome--;
+      energia = max(0, energia - (int)elapsedStats);
+      felicidade = max(0, felicidade - (int)elapsedStats);
+      fome = max(0, fome - (int)elapsedStats);
     } else {
-      if (energia < 100) energia++;
+      energia = min(100, energia + (int)elapsedStats);
     }
   }
 
   // Salvar dados
   if (currentMillis - previousMillisSave >= saveInterval) {
-    previousMillisSave = currentMillis;
+    previousMillisSave += ((currentMillis - previousMillisSave) / saveInterval) * saveInterval;
     saveData();
   }
 
@@ -760,22 +781,32 @@ void loop() {
 
       if (!estaDormindo) {
         if (fome < 20 || felicidade < 20 || energia < 10) {
-          drawSickFace();
+          if (displayedFace != 2) {
+            drawSickFace();
+            displayedFace = 2;
+          }
         } else if (fome < 40) {
-          drawSadFace();
+          if (displayedFace != 1) {
+            drawSadFace();
+            displayedFace = 1;
+          }
         } else {
+          if (displayedFace != 0) {
+            drawCharacter();
+            displayedFace = 0;
+          }
           if (currentMillis - lastBlinkTime > 3000) {
             lastBlinkTime = currentMillis;
             blink();
           }
-
-          updateInterface();
         }
+        updateInterface();
       } else {
         if (currentMillis - lastRedrawTime > 1000) {
           lastRedrawTime = currentMillis;
           drawSleeping();
         }
+        updateInterface();
       }
       break;
 
