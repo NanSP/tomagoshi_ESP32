@@ -1,7 +1,7 @@
 #include <SPI.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
-#include <Adafruit_ST7735.h>
+#include <Adafruit_ILI9341.h>
 #include <EEPROM.h>
 #include <stdio.h>
 
@@ -9,14 +9,15 @@
 #define TFT_DC   2
 #define TFT_RST  4
 
-#define SCREEN_WIDTH 160
-#define SCREEN_HEIGHT 128
+// ILI9341 em landscape: 320x240
+#define SCREEN_WIDTH  320
+#define SCREEN_HEIGHT 240
 
-Adafruit_ST7735 tft = Adafruit_ST7735(TFT_CS, TFT_DC, TFT_RST);
+Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 
 // Botões e buzzer
 const int pinoBotaoNavegar = 15;
-const int pinoBotaoSelect  = 33;
+const int pinoBotaoSelect  = 17;
 const int pinoBuzzer       = 32;
 
 struct ButtonState {
@@ -40,7 +41,7 @@ struct ButtonState {
       rawChangedAt = now;
     }
 
-    if (pressed != stablePressed && now - rawChangedAt >= 30UL) {
+    if (pressed != stablePressed && now - rawChangedAt >= 20UL) {
       stablePressed = pressed;
       if (pressed) {
         pressEvent = true;
@@ -51,21 +52,52 @@ struct ButtonState {
       }
     }
 
-    if (stablePressed && rawPressed && !longHandled && now - pressedAt >= 700UL) {
+    if (stablePressed && rawPressed && !longHandled && now - pressedAt >= 600UL) {
       longPress = true;
       longHandled = true;
     }
+  }
+
+  bool clicked() {
+    return pressEvent || shortPress;
+  }
+
+  void consume() {
+    pressEvent = false;
+    shortPress = false;
+    longHandled = true;
   }
 };
 
 ButtonState navigateButton = {};
 ButtonState selectButton = {};
 
-// Cores ST7735
-#define COR_FUNDO      ST7735_BLACK
-#define COR_TEXTO      ST7735_WHITE
-#define COR_BARRA      ST7735_GREEN
-#define COR_PERSONAGEM ST7735_YELLOW
+// Cores ILI9341 (mesmos valores RGB565 que ST7735)
+#define ILI9341_BLACK   0x0000
+#define ILI9341_WHITE   0xFFFF
+#define ILI9341_RED     0xF800
+#define ILI9341_GREEN   0x07E0
+#define ILI9341_BLUE    0x001F
+#define ILI9341_CYAN    0x07FF
+#define ILI9341_MAGENTA 0xF81F
+#define ILI9341_YELLOW  0xFFE0
+
+// Aliases ST7735 → ILI9341 para compatibilidade
+#define ST7735_BLACK   ILI9341_BLACK
+#define ST7735_WHITE   ILI9341_WHITE
+#define ST7735_RED     ILI9341_RED
+#define ST7735_GREEN   ILI9341_GREEN
+#define ST7735_BLUE    ILI9341_BLUE
+#define ST7735_CYAN    ILI9341_CYAN
+#define ST7735_MAGENTA ILI9341_MAGENTA
+#define ST7735_YELLOW  ILI9341_YELLOW
+
+#define COR_FUNDO      ILI9341_BLACK
+#define COR_TEXTO      ILI9341_WHITE
+#define COR_BARRA      ILI9341_GREEN
+#define COR_PERSONAGEM ILI9341_YELLOW
+#define COR_ASFALTO    0x2104
+#define COR_GRAMA      0x03E0
 
 struct TamagotchiState {
   int energia;
@@ -103,6 +135,7 @@ uint32_t stateChecksum(int energiaValue, int felicidadeValue, int fomeValue,
 
 #define GAME_JUMP 0
 #define GAME_SHIP 1
+#define GAME_CAR  2
 
 int currentMode = MODE_TAMAGOTCHI;
 int currentGame = GAME_JUMP;
@@ -155,11 +188,11 @@ int lastNeed = -1;
 int score = 0;
 int high_score = 0;
 
-#define PLAYER_X 25
-#define PLAYER_SIZE 10
-#define GROUND_Y 115
-#define GRAVITY -0.5
-#define JUMP_FORCE 7
+#define PLAYER_X 50
+#define PLAYER_SIZE 20
+#define GROUND_Y 220
+#define GRAVITY -1.0
+#define JUMP_FORCE 14
 
 float player_y = GROUND_Y - PLAYER_SIZE;
 float player_vel_y = 0;
@@ -167,8 +200,8 @@ bool player_is_jumping = false;
 
 int obstacle_x = SCREEN_WIDTH;
 int last_obstacle_x = SCREEN_WIDTH;
-int obstacle_width = 8;
-int obstacle_height = 16;
+int obstacle_width = 16;
+int obstacle_height = 32;
 
 int game_speed = 2;
 int last_game_speed = 2;
@@ -177,16 +210,16 @@ float last_player_y = GROUND_Y - PLAYER_SIZE;
 const int gameEnergyCost = 5;
 
 // Jogo da nave
-#define SHIP_WIDTH 10
-#define SHIP_HEIGHT 6
-#define SHIP_Y (SCREEN_HEIGHT - 10)
-#define SHIP_SPEED 3
+#define SHIP_WIDTH  20
+#define SHIP_HEIGHT 12
+#define SHIP_Y (SCREEN_HEIGHT - 20)
+#define SHIP_SPEED  5
 #define MAX_ENEMIES 4
 #define MAX_BULLETS 4
-#define ENEMY_WIDTH 8
-#define ENEMY_HEIGHT 6
-#define BULLET_WIDTH 2
-#define BULLET_HEIGHT 4
+#define ENEMY_WIDTH  16
+#define ENEMY_HEIGHT 12
+#define BULLET_WIDTH  4
+#define BULLET_HEIGHT  8
 
 struct Enemy {
   int x, y;
@@ -216,7 +249,57 @@ long enemySpawnInterval = 1100;
 const long autoFireInterval = 450;
 int ship_enemy_speed = 2;
 
+// Jogo do carro
+#define ROAD_X  80
+#define ROAD_W 160
+#define CAR_W   16
+#define CAR_H   26
+#define CAR_Y   190
+#define CAR_SPEED 5
+#define DASH_X (ROAD_X + ROAD_W / 2 - 2)
+#define MAX_OBS 3
+#define MAX_COINS 2
+
+struct Obstacle {
+  int x, y;
+  int lastX, lastY;
+  bool active;
+  bool wasDrawn;
+  uint16_t color;
+};
+
+struct Coin {
+  int x, y;
+  int lastX, lastY;
+  bool active;
+  bool wasDrawn;
+};
+
+Obstacle obs[MAX_OBS];
+Coin coins[MAX_COINS];
+const uint16_t obsColors[4] = { ILI9341_RED, 0xFD20, ILI9341_YELLOW, ILI9341_MAGENTA };
+
+int car_x = ROAD_X + ROAD_W / 2 - CAR_W / 2;
+int last_car_x = car_x;
+int car_score = 0;
+int last_car_score = -1;
+int high_score_car = 0;
+int car_speed = 3;
+long obsSpawnInterval = 1000;
+long coinSpawnInterval = 3000;
+unsigned long carScoreTick = 0;
+unsigned long lastSpeedUpTime = 0;
+unsigned long lastObsSpawn = 0;
+unsigned long lastCoinSpawn = 0;
+unsigned long lastCarUpdate = 0;
+int dashOffset = 0;
+
 struct ShipRecord {
+  int high_score;
+  byte magicByte;
+};
+
+struct CarRecord {
   int high_score;
   byte magicByte;
 };
@@ -228,6 +311,8 @@ void saveData() {
   EEPROM.put(0, state);
   ShipRecord shipRecord = { high_score_ship, 0xB1 };
   EEPROM.put(sizeof(TamagotchiState), shipRecord);
+  CarRecord carRecord = { high_score_car, 0xC2 };
+  EEPROM.put(sizeof(TamagotchiState) + sizeof(ShipRecord), carRecord);
   StateIntegrity integrity = { integrityMagic,
     stateChecksum(state.energia, state.felicidade, state.fome, state.high_score, state.magicByte) };
   EEPROM.put(integrityAddress, integrity);
@@ -267,7 +352,13 @@ void loadData() {
   EEPROM.get(sizeof(TamagotchiState), shipRecord);
   bool shipRecordValid = shipRecord.magicByte == 0xB1 && shipRecord.high_score >= 0;
   high_score_ship = shipRecordValid ? shipRecord.high_score : 0;
-  if (!stateValid || !shipRecordValid || !hasChecksum) saveData();
+
+  CarRecord carRecord;
+  EEPROM.get(sizeof(TamagotchiState) + sizeof(ShipRecord), carRecord);
+  bool carRecordValid = carRecord.magicByte == 0xC2 && carRecord.high_score >= 0;
+  high_score_car = carRecordValid ? carRecord.high_score : 0;
+
+  if (!stateValid || !shipRecordValid || !carRecordValid || !hasChecksum) saveData();
 
   lastEnergia = energia;
   lastFelicidade = felicidade;
@@ -290,16 +381,16 @@ void drawStatusBar(int x, int y, const char* label, int valor) {
   tft.setCursor(x, y);
   tft.print(label);
 
-  tft.drawRect(x + 12, y, 35, 7, COR_TEXTO);
+  tft.drawRect(x + 24, y, 70, 14, COR_TEXTO);
 
-  int largura = map(valor, 0, 100, 0, 33);
-  tft.fillRect(x + 13, y + 1, largura, 5, COR_BARRA);
+  int largura = map(valor, 0, 100, 0, 66);
+  tft.fillRect(x + 25, y + 2, largura, 10, COR_BARRA);
 }
 
 void drawClock() {
-  tft.fillRect(0, 116, SCREEN_WIDTH, 12, COR_FUNDO);
-  tft.setCursor(5, 118);
-  tft.setTextSize(1);
+  tft.fillRect(0, 222, SCREEN_WIDTH, 18, COR_FUNDO);
+  tft.setCursor(10, 224);
+  tft.setTextSize(2);
   tft.setTextColor(COR_TEXTO, COR_FUNDO);
   if (clockConfigured) {
     if (gameHour < 10) tft.print("0");
@@ -310,7 +401,7 @@ void drawClock() {
   } else {
     tft.print("--:--");
   }
-  tft.setCursor(61, 118);
+  tft.setCursor(120, 224);
   tft.print("SEL AJUSTA HORA");
   lastHour = gameHour;
   lastMinute = gameMinute;
@@ -327,10 +418,10 @@ int currentNeed() {
 void updateNeed() {
   int need = currentNeed();
   if (need == lastNeed) return;
-  tft.fillRect(0, 11, SCREEN_WIDTH, 10, COR_FUNDO);
-  tft.setTextSize(1);
-  tft.setTextColor(ST7735_YELLOW, COR_FUNDO);
-  tft.setCursor(5, 12);
+  tft.fillRect(0, 20, SCREEN_WIDTH, 20, COR_FUNDO);
+  tft.setTextSize(2);
+  tft.setTextColor(ILI9341_YELLOW, COR_FUNDO);
+  tft.setCursor(10, 22);
   if (need == 1) tft.print("PRECISA COMER");
   else if (need == 2) tft.print("PRECISA DORMIR");
   else if (need == 3) tft.print("PRECISA BRINCAR");
@@ -339,10 +430,10 @@ void updateNeed() {
 }
 
 void showMessage(const char* message) {
-  tft.fillRect(0, 116, SCREEN_WIDTH, 12, COR_FUNDO);
-  tft.setTextSize(1);
-  tft.setTextColor(ST7735_CYAN, COR_FUNDO);
-  tft.setCursor(4, 118);
+  tft.fillRect(0, 222, SCREEN_WIDTH, 18, COR_FUNDO);
+  tft.setTextSize(2);
+  tft.setTextColor(ILI9341_CYAN, COR_FUNDO);
+  tft.setCursor(8, 224);
   tft.print(message);
   messageActive = true;
   messageStarted = millis();
@@ -352,28 +443,28 @@ void fullRedraw(bool showClock);
 
 void drawClockSetup() {
   tft.fillScreen(COR_FUNDO);
-  tft.setTextSize(2);
-  tft.setTextColor(ST7735_CYAN, COR_FUNDO);
-  tft.setCursor(8, 10);
+  tft.setTextSize(3);
+  tft.setTextColor(ILI9341_CYAN, COR_FUNDO);
+  tft.setCursor(16, 20);
   tft.print("AJUSTAR HORA");
 
-  tft.setTextSize(3);
+  tft.setTextSize(4);
   tft.setTextColor(COR_TEXTO, COR_FUNDO);
-  tft.setCursor(35, 50);
+  tft.setCursor(70, 90);
   if (clockEditHour < 10) tft.print("0");
   tft.print(clockEditHour);
   tft.print(":");
   if (clockEditMinute < 10) tft.print("0");
   tft.print(clockEditMinute);
-  tft.drawRect(clockEditField == 0 ? 32 : 86, 46, 40, 29, ST7735_YELLOW);
+  tft.drawRect(clockEditField == 0 ? 64 : 172, 86, 80, 44, ILI9341_YELLOW);
 
-  tft.setTextSize(1);
+  tft.setTextSize(2);
   tft.setTextColor(COR_TEXTO, COR_FUNDO);
-  tft.setCursor(5, 94);
+  tft.setCursor(10, 160);
   tft.print("NAV +1  SEG +5");
-  tft.setCursor(5, 106);
+  tft.setCursor(10, 185);
   tft.print("SEL PROX / CONFIRMA");
-  tft.setCursor(5, 118);
+  tft.setCursor(10, 210);
   tft.print("SEG SEL: CANCELA");
 }
 
@@ -382,12 +473,13 @@ void enterClockSetup() {
   clockEditMinute = gameMinute;
   clockEditField = 0;
   currentMode = MODE_CLOCK_SET;
-  selectButton.longHandled = true; // ignora a soltura que abriu esta tela
+  selectButton.consume(); // ignora a soltura que abriu esta tela
   drawClockSetup();
 }
 
 void clock_setup_loop() {
   if (selectButton.longPress) {
+    selectButton.consume();
     currentMode = MODE_TAMAGOTCHI;
     fullRedraw(true);
     return;
@@ -395,12 +487,14 @@ void clock_setup_loop() {
 
   if (navigateButton.shortPress || navigateButton.longPress) {
     int step = navigateButton.longPress ? 5 : 1;
+    navigateButton.consume();
     if (clockEditField == 0) clockEditHour = (clockEditHour + step) % 24;
     else clockEditMinute = (clockEditMinute + step) % 60;
     drawClockSetup();
   }
 
-  if (selectButton.shortPress) {
+  if (selectButton.clicked()) {
+    selectButton.consume();
     if (clockEditField == 0) {
       clockEditField = 1;
       drawClockSetup();
@@ -418,23 +512,23 @@ void clock_setup_loop() {
 
 void updateInterface() {
   if (energia != lastEnergia) {
-    tft.fillRect(14, 2, 33, 5, COR_FUNDO);
-    int largura = map(energia, 0, 100, 0, 33);
-    tft.fillRect(14, 2, largura, 5, COR_BARRA);
+    tft.fillRect(28, 4, 66, 10, COR_FUNDO);
+    int largura = map(energia, 0, 100, 0, 66);
+    tft.fillRect(28, 4, largura, 10, COR_BARRA);
     lastEnergia = energia;
   }
 
   if (felicidade != lastFelicidade) {
-    tft.fillRect(67, 2, 33, 5, COR_FUNDO);
-    int largura = map(felicidade, 0, 100, 0, 33);
-    tft.fillRect(67, 2, largura, 5, COR_BARRA);
+    tft.fillRect(134, 4, 66, 10, COR_FUNDO);
+    int largura = map(felicidade, 0, 100, 0, 66);
+    tft.fillRect(134, 4, largura, 10, COR_BARRA);
     lastFelicidade = felicidade;
   }
 
   if (fome != lastFome) {
-    tft.fillRect(120, 2, 33, 5, COR_FUNDO);
-    int largura = map(fome, 0, 100, 0, 33);
-    tft.fillRect(120, 2, largura, 5, COR_BARRA);
+    tft.fillRect(240, 4, 66, 10, COR_FUNDO);
+    int largura = map(fome, 0, 100, 0, 66);
+    tft.fillRect(240, 4, largura, 10, COR_BARRA);
     lastFome = fome;
   }
 
@@ -456,15 +550,15 @@ unsigned long eyePoseStarted = 0;
 int nextEyeAnimation = 0;
 int displayedFace = -1; // 0: normal, 1: triste, 2: doente, 3: dormindo
 
-int eyeW = 40;
-int eyeH = 35;
-int eyeY = 60;
+int eyeW = 80;
+int eyeH = 70;
+int eyeY = 90;
 
-int leftEyeX = 25;
-int rightEyeX = 95;
+int leftEyeX = 50;
+int rightEyeX = 190;
 
 void drawEyesPose(int pose) {
-  tft.fillRect(0, 20, 160, 96, COR_FUNDO);
+  tft.fillRect(0, 40, 320, 180, COR_FUNDO);
 
   if (pose == EYES_BLINK) {
     tft.drawLine(leftEyeX, eyeY + 18, leftEyeX + eyeW, eyeY + 18, COR_TEXTO);
@@ -472,17 +566,17 @@ void drawEyesPose(int pose) {
     return;
   }
 
-  int pupilOffset = pose == EYES_LEFT ? -6 : (pose == EYES_RIGHT ? 6 : 0);
+  int pupilOffset = pose == EYES_LEFT ? -12 : (pose == EYES_RIGHT ? 12 : 0);
   if (pose == EYES_WINK) {
     tft.drawLine(leftEyeX, eyeY + 18, leftEyeX + eyeW, eyeY + 18, COR_TEXTO);
   } else {
-    tft.fillRoundRect(leftEyeX, eyeY, eyeW, eyeH, 8, COR_TEXTO);
-    tft.fillRoundRect(leftEyeX + 15 + pupilOffset, eyeY + 8,
-                      10, 18, 5, COR_FUNDO);
+    tft.fillRoundRect(leftEyeX, eyeY, eyeW, eyeH, 16, COR_TEXTO);
+    tft.fillRoundRect(leftEyeX + 30 + pupilOffset, eyeY + 16,
+                      20, 36, 10, COR_FUNDO);
   }
-  tft.fillRoundRect(rightEyeX, eyeY, eyeW, eyeH, 8, COR_TEXTO);
-  tft.fillRoundRect(rightEyeX + 15 + pupilOffset, eyeY + 8,
-                    10, 18, 5, COR_FUNDO);
+  tft.fillRoundRect(rightEyeX, eyeY, eyeW, eyeH, 16, COR_TEXTO);
+  tft.fillRoundRect(rightEyeX + 30 + pupilOffset, eyeY + 16,
+                    20, 36, 10, COR_FUNDO);
 }
 
 void drawEyes() {
@@ -521,9 +615,9 @@ void drawSleeping();
 void fullRedraw(bool showClock) {
   tft.fillScreen(COR_FUNDO);
 
-  drawStatusBar(1, 1, "EN", energia);
-  drawStatusBar(54, 1, "FE", felicidade);
-  drawStatusBar(107, 1, "SA", fome);
+  drawStatusBar(2, 2, "EN", energia);
+  drawStatusBar(108, 2, "FE", felicidade);
+  drawStatusBar(214, 2, "SA", fome);
   messageActive = false;
   if (showClock) drawClock();
 
@@ -553,16 +647,16 @@ void drawHappyFace() {
   tft.fillScreen(COR_FUNDO);
 
   // ^ ^
-  tft.drawLine(30, 75, 45, 60, COR_TEXTO);
-  tft.drawLine(45, 60, 60, 75, COR_TEXTO);
+  tft.drawLine(60, 140, 90, 110, COR_TEXTO);
+  tft.drawLine(90, 110, 120, 140, COR_TEXTO);
 
-  tft.drawLine(100, 75, 115, 60, COR_TEXTO);
-  tft.drawLine(115, 60, 130, 75, COR_TEXTO);
+  tft.drawLine(200, 140, 230, 110, COR_TEXTO);
+  tft.drawLine(230, 110, 260, 140, COR_TEXTO);
 
   // sorriso
-  tft.drawLine(60, 100, 75, 110, COR_TEXTO);
-  tft.drawLine(75, 110, 85, 110, COR_TEXTO);
-  tft.drawLine(85, 110, 100, 100, COR_TEXTO);
+  tft.drawLine(120, 190, 150, 210, COR_TEXTO);
+  tft.drawLine(150, 210, 170, 210, COR_TEXTO);
+  tft.drawLine(170, 210, 200, 190, COR_TEXTO);
 
   tone(pinoBuzzer, 1000, 100);
   delay(1000);
@@ -576,16 +670,16 @@ void drawSadFace() {
 
   tone(pinoBuzzer, 200, 300);
 
-  tft.fillRect(0, 20, 160, 96, COR_FUNDO);
+  tft.fillRect(0, 40, 320, 180, COR_FUNDO);
 
   // olhos inclinados
-  tft.drawLine(30, 60, 60, 75, COR_TEXTO);
-  tft.drawLine(100, 75, 130, 60, COR_TEXTO);
+  tft.drawLine(60, 110, 120, 140, COR_TEXTO);
+  tft.drawLine(200, 140, 260, 110, COR_TEXTO);
 
   // boca triste
-  tft.drawLine(60, 110, 75, 100, COR_TEXTO);
-  tft.drawLine(75, 100, 85, 100, COR_TEXTO);
-  tft.drawLine(85, 100, 100, 110, COR_TEXTO);
+  tft.drawLine(120, 205, 150, 185, COR_TEXTO);
+  tft.drawLine(150, 185, 170, 185, COR_TEXTO);
+  tft.drawLine(170, 185, 200, 205, COR_TEXTO);
 
 }
 
@@ -597,21 +691,21 @@ void drawSickFace() {
 
   tone(pinoBuzzer, 100, 500);
 
-  tft.fillRect(0, 20, 160, 96, COR_FUNDO);
+  tft.fillRect(0, 40, 320, 180, COR_FUNDO);
 
-  tft.setTextColor(ST7735_RED);
-  tft.setTextSize(3);
+  tft.setTextColor(ILI9341_RED);
+  tft.setTextSize(5);
 
-  tft.setCursor(35, 60);
+  tft.setCursor(70, 100);
   tft.print("X");
 
-  tft.setCursor(105, 60);
+  tft.setCursor(210, 100);
   tft.print("X");
 
   // boca torta
-  tft.drawLine(65, 100, 75, 95, ST7735_RED);
-  tft.drawLine(75, 95, 85, 105, ST7735_RED);
-  tft.drawLine(85, 105, 95, 100, ST7735_RED);
+  tft.drawLine(130, 190, 150, 180, ILI9341_RED);
+  tft.drawLine(150, 180, 170, 200, ILI9341_RED);
+  tft.drawLine(170, 200, 190, 190, ILI9341_RED);
 
   tft.setTextColor(COR_TEXTO);
 }
@@ -625,8 +719,8 @@ void drawEatingFace() {
   drawEyes();
 
   // boca aberta
-  tft.fillCircle(80, 105, 12, COR_TEXTO);
-  tft.fillCircle(80, 105, 6, COR_FUNDO);
+  tft.fillCircle(160, 195, 24, COR_TEXTO);
+  tft.fillCircle(160, 195, 12, COR_FUNDO);
 
   tone(pinoBuzzer, 1200, 80);
   delay(800);
@@ -638,62 +732,62 @@ void drawEatingFace() {
 
 void drawSleeping() {
 
-  tft.fillRect(0, 20, 160, 90, COR_FUNDO);
+  tft.fillRect(0, 40, 320, 180, COR_FUNDO);
 
-  tft.drawLine(leftEyeX, eyeY + 18,
+  tft.drawLine(leftEyeX, eyeY + 35,
                leftEyeX + eyeW,
-               eyeY + 18,
+               eyeY + 35,
                COR_TEXTO);
 
-  tft.drawLine(rightEyeX, eyeY + 18,
+  tft.drawLine(rightEyeX, eyeY + 35,
                rightEyeX + eyeW,
-               eyeY + 18,
+               eyeY + 35,
                COR_TEXTO);
 
   tft.setTextColor(COR_TEXTO);
-  tft.setTextSize(2);
+  tft.setTextSize(4);
 
-  tft.setCursor(60, 30);
+  tft.setCursor(120, 50);
   tft.print("Zzz");
 }
 
 // ================= MENU =================
 
 void drawMenuItem(int index, bool selected) {
-  int x = 8 + (index * 38);
-  int y = 42;
+  int x = 16 + (index * 76);
+  int y = 80;
 
-  tft.fillRect(x - 2, y - 2, 34, 48, COR_FUNDO);
+  tft.fillRect(x - 4, y - 4, 68, 96, COR_FUNDO);
 
   if (selected) {
-    tft.drawRect(x - 2, y - 2, 34, 34, ST7735_YELLOW);
+    tft.drawRect(x - 4, y - 4, 68, 68, ILI9341_YELLOW);
   } else {
-    tft.drawRect(x, y, 30, 30, COR_TEXTO);
+    tft.drawRect(x, y, 60, 60, COR_TEXTO);
   }
 
   if (index == 0) {
-    tft.fillCircle(x + 15, y + 15, 9, ST7735_GREEN);
-    tft.fillRect(x + 12, y + 12, 6, 6, COR_FUNDO);
+    tft.fillCircle(x + 30, y + 30, 18, ILI9341_GREEN);
+    tft.fillRect(x + 24, y + 24, 12, 12, COR_FUNDO);
   } else if (index == 1) {
-    tft.fillCircle(x + 15, y + 15, 9, ST7735_YELLOW);
-    tft.fillRect(x + 11, y + 13, 8, 4, COR_FUNDO);
+    tft.fillCircle(x + 30, y + 30, 18, ILI9341_YELLOW);
+    tft.fillRect(x + 22, y + 26, 16, 8, COR_FUNDO);
   } else if (index == 2) {
-    tft.fillCircle(x + 15, y + 15, 9, ST7735_BLUE);
-    tft.setCursor(x + 10, y + 8);
-    tft.setTextSize(2);
+    tft.fillCircle(x + 30, y + 30, 18, ILI9341_BLUE);
+    tft.setCursor(x + 20, y + 16);
+    tft.setTextSize(3);
     tft.setTextColor(COR_TEXTO, COR_FUNDO);
     tft.print("Z");
   } else if (index == 3) {
-    tft.fillCircle(x + 15, y + 15, 9, ST7735_RED);
-    tft.fillRect(x + 11, y + 14, 8, 3, COR_FUNDO);
-    tft.fillRect(x + 14, y + 11, 3, 8, COR_FUNDO);
+    tft.fillCircle(x + 30, y + 30, 18, ILI9341_RED);
+    tft.fillRect(x + 22, y + 28, 16, 6, COR_FUNDO);
+    tft.fillRect(x + 28, y + 22, 6, 16, COR_FUNDO);
   }
 
   const char* opcoes[] = {"COM", "JOG", estaDormindo ? "ACO" : "DOR", "CUR"};
 
-  tft.setTextSize(1);
+  tft.setTextSize(2);
   tft.setTextColor(COR_TEXTO, COR_FUNDO);
-  tft.setCursor(x + 5, y + 36);
+  tft.setCursor(x + 10, y + 72);
   tft.print(opcoes[index]);
 }
 
@@ -701,9 +795,9 @@ void drawMenu() {
   if (!menuInitialized) {
     tft.fillScreen(COR_FUNDO);
 
-    tft.setTextSize(2);
-    tft.setTextColor(ST7735_CYAN, COR_FUNDO);
-    tft.setCursor(55, 12);
+    tft.setTextSize(3);
+    tft.setTextColor(ILI9341_CYAN, COR_FUNDO);
+    tft.setCursor(110, 20);
     tft.print("MENU");
 
     tft.setTextSize(1);
@@ -713,9 +807,10 @@ void drawMenu() {
       drawMenuItem(i, false);
     }
 
-    tft.setCursor(5, 109);
+    tft.setTextSize(2);
+    tft.setCursor(10, 200);
     tft.print("NAV PROX.  SEL OK");
-    tft.setCursor(5, 119);
+    tft.setCursor(10, 220);
     tft.print("SEGURE NAV: VOLTAR");
 
     menuInitialized = true;
@@ -729,10 +824,10 @@ void drawMenu() {
 
     drawMenuItem(menuOpcao, true);
     const char* nomes[] = {"ALIMENTAR", "JOGAR", estaDormindo ? "ACORDAR" : "DORMIR", "CURAR"};
-    tft.fillRect(0, 94, SCREEN_WIDTH, 12, COR_FUNDO);
-    tft.setTextSize(1);
-    tft.setTextColor(ST7735_YELLOW, COR_FUNDO);
-    tft.setCursor(40, 96);
+    tft.fillRect(0, 175, SCREEN_WIDTH, 20, COR_FUNDO);
+    tft.setTextSize(2);
+    tft.setTextColor(ILI9341_YELLOW, COR_FUNDO);
+    tft.setCursor(80, 177);
     tft.print(nomes[menuOpcao]);
     lastMenuOpcao = menuOpcao;
   }
@@ -747,6 +842,7 @@ void menu_loop() {
   drawMenu();
 
   if (navigateButton.longPress) {
+    navigateButton.consume();
     menuInitialized = false;
     currentMode = MODE_TAMAGOTCHI;
     fullRedraw(true);
@@ -755,11 +851,13 @@ void menu_loop() {
   }
 
   if (navigateButton.shortPress) {
+    navigateButton.consume();
     menuOpcao = (menuOpcao + 1) % totalOpcoes;
     tone(pinoBuzzer, 440, 50);
   }
 
-  if (selectButton.pressEvent) {
+  if (selectButton.clicked()) {
+    selectButton.consume();
     tone(pinoBuzzer, 880, 100);
 
     menuInitialized = false;
@@ -790,40 +888,58 @@ void menu_loop() {
 }
 
 void drawGameMenuItem(int index, bool selected) {
-  int x = 16 + index * 78;
-  int y = 31;
-  tft.fillRect(x - 3, y - 3, 56, 68, COR_FUNDO);
-  tft.drawRect(x - 2, y - 2, 54, 54, selected ? ST7735_YELLOW : COR_TEXTO);
+  int x = 16 + index * 100;
+  int y = 55;
+  tft.fillRect(x - 4, y - 4, 92, 124, COR_FUNDO);
+  tft.drawRect(x - 2, y - 2, 88, 92, selected ? ILI9341_YELLOW : COR_TEXTO);
 
   if (index == GAME_JUMP) {
-    tft.fillRect(x + 19, y + 30, 12, 12, ST7735_GREEN);
-    tft.drawLine(x + 25, y + 9, x + 25, y + 27, COR_TEXTO);
-    tft.drawLine(x + 21, y + 14, x + 25, y + 9, COR_TEXTO);
-    tft.drawLine(x + 29, y + 14, x + 25, y + 9, COR_TEXTO);
+    tft.fillRect(x + 32, y + 52, 20, 20, ILI9341_GREEN);
+    tft.drawLine(x + 42, y + 14, x + 42, y + 46, COR_TEXTO);
+    tft.drawLine(x + 34, y + 24, x + 42, y + 14, COR_TEXTO);
+    tft.drawLine(x + 50, y + 24, x + 42, y + 14, COR_TEXTO);
+  } else if (index == GAME_SHIP) {
+    tft.fillTriangle(x + 42, y + 16, x + 20, y + 72,
+                     x + 64, y + 72, ILI9341_CYAN);
   } else {
-    tft.fillTriangle(x + 25, y + 10, x + 12, y + 39,
-                     x + 38, y + 39, ST7735_CYAN);
+    tft.fillRoundRect(x + 28, y + 16, 28, 52, 4, ILI9341_YELLOW);
+    tft.fillRect(x + 34, y + 30, 16, 10, 0x0000);
+    tft.fillRect(x + 34, y + 52, 16, 6, 0x0000);
+    tft.fillRect(x + 24, y + 22, 4, 12, 0xFFFF);
+    tft.fillRect(x + 56, y + 22, 4, 12, 0xFFFF);
+    tft.fillRect(x + 24, y + 48, 4, 12, 0xFFFF);
+    tft.fillRect(x + 56, y + 48, 4, 12, 0xFFFF);
   }
 
-  tft.setTextSize(1);
-  tft.setTextColor(selected ? ST7735_YELLOW : COR_TEXTO, COR_FUNDO);
-  tft.setCursor(x + 13, y + 56);
-  tft.print(index == GAME_JUMP ? "PULO" : "NAVE");
+  tft.setTextSize(2);
+  tft.setTextColor(selected ? ILI9341_YELLOW : COR_TEXTO, COR_FUNDO);
+  if (index == GAME_JUMP) {
+    tft.setCursor(x + 20, y + 98);
+    tft.print("PULO");
+  } else if (index == GAME_SHIP) {
+    tft.setCursor(x + 20, y + 98);
+    tft.print("NAVE");
+  } else {
+    tft.setCursor(x + 14, y + 98);
+    tft.print("CARRO");
+  }
 }
 
 void drawGameSelectMenu() {
   if (!gameMenuInitialized) {
     tft.fillScreen(COR_FUNDO);
-    tft.setTextSize(1);
-    tft.setTextColor(ST7735_CYAN, COR_FUNDO);
-    tft.setCursor(38, 8);
+    tft.setTextSize(3);
+    tft.setTextColor(ILI9341_CYAN, COR_FUNDO);
+    tft.setCursor(76, 16);
     tft.print("ESCOLHA O JOGO");
     drawGameMenuItem(GAME_JUMP, false);
     drawGameMenuItem(GAME_SHIP, false);
+    drawGameMenuItem(GAME_CAR, false);
+    tft.setTextSize(2);
     tft.setTextColor(COR_TEXTO, COR_FUNDO);
-    tft.setCursor(5, 105);
+    tft.setCursor(10, 196);
     tft.print("NAV PROX.  SEL OK");
-    tft.setCursor(5, 117);
+    tft.setCursor(10, 218);
     tft.print("SEGURE NAV: VOLTAR");
     gameMenuInitialized = true;
     lastGameMenuOpcao = -1;
@@ -832,11 +948,13 @@ void drawGameSelectMenu() {
   if (lastGameMenuOpcao != gameMenuOpcao) {
     if (lastGameMenuOpcao >= 0) drawGameMenuItem(lastGameMenuOpcao, false);
     drawGameMenuItem(gameMenuOpcao, true);
-    tft.fillRect(0, 96, SCREEN_WIDTH, 9, COR_FUNDO);
-    tft.setTextSize(1);
-    tft.setTextColor(ST7735_YELLOW, COR_FUNDO);
-    tft.setCursor(2, 97);
-    tft.print(gameMenuOpcao == GAME_SHIP ? "NAV< SEL> AMBOS PAUSA" : "NAV PULA SEL PAUSA");
+    tft.fillRect(0, 170, SCREEN_WIDTH, 20, COR_FUNDO);
+    tft.setTextSize(2);
+    tft.setTextColor(ILI9341_YELLOW, COR_FUNDO);
+    tft.setCursor(4, 172);
+    if (gameMenuOpcao == GAME_SHIP) tft.print("NAV< SEL> AMBOS PAUSA");
+    else if (gameMenuOpcao == GAME_CAR) tft.print("NAV< SEL> AMBOS PAUSA");
+    else tft.print("NAV PULA SEL PAUSA");
     lastGameMenuOpcao = gameMenuOpcao;
   }
 }
@@ -844,6 +962,7 @@ void drawGameSelectMenu() {
 void game_select_loop() {
   drawGameSelectMenu();
   if (navigateButton.longPress) {
+    navigateButton.consume();
     gameMenuInitialized = false;
     menuInitialized = false;
     currentMode = MODE_MENU;
@@ -851,10 +970,12 @@ void game_select_loop() {
     return;
   }
   if (navigateButton.shortPress) {
-    gameMenuOpcao = (gameMenuOpcao + 1) % 2;
+    navigateButton.consume();
+    gameMenuOpcao = (gameMenuOpcao + 1) % 3;
     tone(pinoBuzzer, 440, 50);
   }
-  if (selectButton.pressEvent) {
+  if (selectButton.clicked()) {
+    selectButton.consume();
     gameMenuInitialized = false;
     currentGame = gameMenuOpcao;
     startGame();
@@ -883,13 +1004,14 @@ void game_reset() {
 
   tft.fillScreen(COR_FUNDO);
   tft.drawLine(0, GROUND_Y, SCREEN_WIDTH, GROUND_Y, COR_TEXTO);
-  tft.setTextSize(1);
+  tft.setTextSize(2);
   tft.setTextColor(COR_TEXTO, COR_FUNDO);
-  tft.setCursor(4, 118);
+  tft.setCursor(8, 222);
   tft.print("NAV PULA  SEL PAUSA");
 }
 
 void ship_game_reset();
+void car_game_reset();
 
 void startGame() {
   if (energia < gameEnergyCost) {
@@ -901,6 +1023,7 @@ void startGame() {
   energia -= gameEnergyCost;
   currentMode = MODE_GAME;
   if (currentGame == GAME_SHIP) ship_game_reset();
+  else if (currentGame == GAME_CAR) car_game_reset();
   else game_reset();
 }
 
@@ -916,36 +1039,38 @@ void showGameOver(int finalScore, int& highScore) {
 
   tft.fillScreen(COR_FUNDO);
 
-  tft.setTextSize(2);
-  tft.setTextColor(ST7735_RED, COR_FUNDO);
-  tft.setCursor(25, 17);
+  tft.setTextSize(4);
+  tft.setTextColor(ILI9341_RED, COR_FUNDO);
+  tft.setCursor(50, 30);
   tft.print("GAME OVER");
 
-  tft.setTextSize(1);
+  tft.setTextSize(2);
   tft.setTextColor(COR_TEXTO, COR_FUNDO);
-  tft.setCursor(55, 37);
-  tft.print(currentGame == GAME_SHIP ? "NAVE" : "PULO");
-  tft.setCursor(42, 48);
+  tft.setCursor(110, 90);
+  if (currentGame == GAME_SHIP) tft.print("NAVE");
+  else if (currentGame == GAME_CAR) tft.print("CARRO");
+  else tft.print("PULO");
+  tft.setCursor(84, 115);
   tft.print("Score: ");
   tft.print(finalScore);
-  tft.setCursor(42, 61);
+  tft.setCursor(84, 140);
   tft.print("Recorde: ");
   tft.print(highScore);
-  tft.setCursor(26, 75);
+  tft.setCursor(52, 165);
   tft.print("FEL +");
   tft.print(gainedFelicidade);
   tft.print("   EN -");
   tft.print(gameEnergyCost);
 
   if (newRecord) {
-    tft.setCursor(40, 88);
-    tft.setTextColor(ST7735_YELLOW, COR_FUNDO);
+    tft.setCursor(80, 190);
+    tft.setTextColor(ILI9341_YELLOW, COR_FUNDO);
     tft.print("NOVO RECORDE!");
   }
   tft.setTextColor(COR_TEXTO, COR_FUNDO);
-  tft.setCursor(28, 105);
+  tft.setCursor(56, 210);
   tft.print("NAV: VOLTAR");
-  tft.setCursor(28, 117);
+  tft.setCursor(56, 228);
   tft.print("SEL: REPETIR");
   currentMode = MODE_GAME_OVER;
 }
@@ -969,10 +1094,10 @@ void updateGameDisplay() {
   tft.fillRect(obstacle_x, GROUND_Y - obstacle_height, obstacle_width, obstacle_height, ST7735_RED);
 
   if (score != last_score) {
-    tft.fillRect(5, 5, 80, 12, COR_FUNDO);
-    tft.setTextSize(1);
+    tft.fillRect(10, 20, 160, 22, COR_FUNDO);
+    tft.setTextSize(2);
     tft.setTextColor(COR_TEXTO, COR_FUNDO);
-    tft.setCursor(5, 5);
+    tft.setCursor(10, 20);
     tft.print("Score: ");
     tft.print(score);
     last_score = score;
@@ -985,21 +1110,25 @@ void updateGameDisplay() {
 void pauseGame() {
   currentMode = MODE_GAME_PAUSED;
   tft.fillScreen(COR_FUNDO);
-  tft.setTextSize(2);
-  tft.setTextColor(ST7735_CYAN, COR_FUNDO);
-  tft.setCursor(37, 28);
+  tft.setTextSize(4);
+  tft.setTextColor(ILI9341_CYAN, COR_FUNDO);
+  tft.setCursor(74, 50);
   tft.print("PAUSADO");
-  tft.setTextSize(1);
+  tft.setTextSize(2);
   tft.setTextColor(COR_TEXTO, COR_FUNDO);
-  tft.setCursor(53, 60);
-  tft.print(currentGame == GAME_SHIP ? "NAVE" : "PULO");
-  tft.setCursor(28, 80);
+  tft.setCursor(106, 120);
+  if (currentGame == GAME_SHIP) tft.print("NAVE");
+  else if (currentGame == GAME_CAR) tft.print("CARRO");
+  else tft.print("PULO");
+  tft.setCursor(56, 155);
   tft.print("SEL: CONTINUAR");
-  tft.setCursor(28, 98);
+  tft.setCursor(56, 185);
   tft.print("NAV: SAIR");
 }
 
 void updateShipDisplay();
+void updateCarDisplay(int oldDashOffset);
+void fillRectClip(int x, int y, int w, int h, uint16_t c);
 
 void resumeGame() {
   currentMode = MODE_GAME;
@@ -1009,26 +1138,41 @@ void resumeGame() {
     updateShipDisplay();
     return;
   }
+  if (currentGame == GAME_CAR) {
+    last_car_score = -1;
+    last_car_x = car_x;
+    tft.fillScreen(COR_GRAMA);
+    tft.fillRect(ROAD_X, 0, ROAD_W, SCREEN_HEIGHT, COR_ASFALTO);
+    tft.fillRect(ROAD_X - 4, 0, 4, SCREEN_HEIGHT, COR_TEXTO);
+    tft.fillRect(ROAD_X + ROAD_W, 0, 4, SCREEN_HEIGHT, COR_TEXTO);
+    for (int y = -40; y < SCREEN_HEIGHT; y += 40) {
+      fillRectClip(DASH_X, y, 4, 20, COR_TEXTO);
+    }
+    updateCarDisplay(dashOffset);
+    return;
+  }
   last_player_y = player_y;
   last_obstacle_x = obstacle_x;
   last_score = -1;
   updateGameDisplay();
-  tft.setTextSize(1);
+  tft.setTextSize(2);
   tft.setTextColor(COR_TEXTO, COR_FUNDO);
-  tft.setCursor(4, 118);
+  tft.setCursor(8, 222);
   tft.print("NAV PULA  SEL PAUSA");
 }
 
-void game_loop() {
+void jump_game_loop() {
   unsigned long currentMillis = millis();
   static unsigned long lastGameUpdate = 0;
 
-  if (selectButton.pressEvent) {
+  if (selectButton.clicked()) {
+    selectButton.consume();
     pauseGame();
     return;
   }
 
-  if (navigateButton.pressEvent && !player_is_jumping) {
+  if (navigateButton.clicked() && !player_is_jumping) {
+    navigateButton.consume();
     player_vel_y = JUMP_FORCE;
     player_is_jumping = true;
     tone(pinoBuzzer, 800, 50);
@@ -1143,10 +1287,10 @@ void updateShipDisplay() {
   }
 
   if (ship_score != last_ship_score) {
-    tft.fillRect(4, 4, 100, 11, COR_FUNDO);
-    tft.setTextSize(1);
+    tft.fillRect(8, 8, 200, 22, COR_FUNDO);
+    tft.setTextSize(2);
     tft.setTextColor(COR_TEXTO, COR_FUNDO);
-    tft.setCursor(4, 4);
+    tft.setCursor(8, 8);
     tft.print("Score: ");
     tft.print(ship_score);
     last_ship_score = ship_score;
@@ -1246,6 +1390,307 @@ void ship_game_loop() {
   updateShipDisplay();
 }
 
+// ---------- JOGO 3: CARRO ----------
+
+void car_game_over() {
+  showGameOver(car_score, high_score_car);
+}
+
+// Desenha apenas a parte visível do retângulo.
+void fillRectClip(int x, int y, int w, int h, uint16_t c) {
+  if (x < 0) { w += x; x = 0; }
+  if (y < 0) { h += y; y = 0; }
+  if (x + w > SCREEN_WIDTH) w = SCREEN_WIDTH - x;
+  if (y + h > SCREEN_HEIGHT) h = SCREEN_HEIGHT - y;
+  if (w <= 0 || h <= 0) return;
+  tft.fillRect(x, y, w, h, c);
+}
+
+// Restaura o asfalto e o tracejado que passa por baixo de um sprite apagado.
+void drawRoadBackgroundRect(int x, int y, int w, int h) {
+  fillRectClip(x, y, w, h, COR_ASFALTO);
+
+  int stripeLeft = (x > DASH_X) ? x : DASH_X;
+  int stripeRight = (x + w < DASH_X + 4) ? x + w : DASH_X + 4;
+  if (stripeLeft >= stripeRight) return;
+
+  int stripeY = -40 + dashOffset;
+  while (stripeY + 20 <= y) stripeY += 40;
+  for (; stripeY < y + h; stripeY += 40) {
+    int top = (y > stripeY) ? y : stripeY;
+    int bottom = (y + h < stripeY + 20) ? y + h : stripeY + 20;
+    if (top < bottom) {
+      fillRectClip(stripeLeft, top, stripeRight - stripeLeft, bottom - top, COR_TEXTO);
+    }
+  }
+}
+
+void drawCarSprite(int x, int y, uint16_t body) {
+  fillRectClip(x, y, CAR_W, CAR_H, body);
+  fillRectClip(x + 3, y + 6, CAR_W - 6, 6, ILI9341_BLACK);   // para-brisa
+  fillRectClip(x + 3, y + 16, CAR_W - 6, 5, ILI9341_BLACK); // vidro traseiro
+}
+
+// Desenha uma moeda 8x8.
+void drawCoinSprite(int x, int y) {
+  fillRectClip(x, y, 8, 8, ILI9341_YELLOW);
+  fillRectClip(x + 2, y + 2, 4, 4, ILI9341_BLACK);
+}
+
+// Atualiza o tracejado central na nova posição.
+void moveDashes(int oldOff, int newOff) {
+  (void)oldOff;
+  fillRectClip(DASH_X, 0, 4, SCREEN_HEIGHT, COR_ASFALTO);
+  for (int y = -40 + newOff; y < SCREEN_HEIGHT; y += 40) {
+    fillRectClip(DASH_X, y, 4, 20, COR_TEXTO);
+  }
+}
+
+void car_game_reset() {
+  play_tone(600, 100);
+
+  car_score = 0;
+  last_car_score = -1;
+  car_x = ROAD_X + ROAD_W / 2 - CAR_W / 2;
+  last_car_x = car_x;
+  car_speed = 3;
+  obsSpawnInterval = 1000;
+  coinSpawnInterval = 3000;
+  dashOffset = 0;
+  bothPressedAt = 0;
+
+  for (int i = 0; i < MAX_OBS; i++) {
+    obs[i].active = false;
+    obs[i].wasDrawn = false;
+  }
+
+  for (int i = 0; i < MAX_COINS; i++) {
+    coins[i].active = false;
+    coins[i].wasDrawn = false;
+  }
+
+  unsigned long now = millis();
+  carScoreTick = now;
+  lastSpeedUpTime = now;
+  lastObsSpawn = now;
+  lastCoinSpawn = now;
+  lastCarUpdate = now;
+
+  tft.fillScreen(COR_GRAMA);
+  tft.fillRect(ROAD_X, 0, ROAD_W, SCREEN_HEIGHT, COR_ASFALTO);
+  tft.fillRect(ROAD_X - 4, 0, 4, SCREEN_HEIGHT, COR_TEXTO);
+  tft.fillRect(ROAD_X + ROAD_W, 0, 4, SCREEN_HEIGHT, COR_TEXTO);
+
+  for (int y = -40; y < SCREEN_HEIGHT; y += 40) {
+    fillRectClip(DASH_X, y, 4, 20, COR_TEXTO);
+  }
+}
+
+void updateCarDisplay(int oldDashOffset) {
+  moveDashes(oldDashOffset, dashOffset);
+
+  // Apaga as posições anteriores e restaura a pista sob cada sprite.
+  drawRoadBackgroundRect(last_car_x, CAR_Y, CAR_W, CAR_H);
+  for (int i = 0; i < MAX_COINS; i++) {
+    if (coins[i].wasDrawn) {
+      drawRoadBackgroundRect(coins[i].lastX, coins[i].lastY, 8, 8);
+      coins[i].wasDrawn = false;
+    }
+  }
+  for (int i = 0; i < MAX_OBS; i++) {
+    if (obs[i].wasDrawn) {
+      drawRoadBackgroundRect(obs[i].lastX, obs[i].lastY, CAR_W, CAR_H);
+      obs[i].wasDrawn = false;
+    }
+  }
+
+  // Desenha moedas, obstáculos e o carro do jogador nessa ordem.
+  for (int i = 0; i < MAX_COINS; i++) {
+    if (!coins[i].active) continue;
+    drawCoinSprite(coins[i].x, coins[i].y);
+    coins[i].lastX = coins[i].x;
+    coins[i].lastY = coins[i].y;
+    coins[i].wasDrawn = true;
+  }
+  for (int i = 0; i < MAX_OBS; i++) {
+    if (!obs[i].active) continue;
+    drawCarSprite(obs[i].x, obs[i].y, obs[i].color);
+    obs[i].lastX = obs[i].x;
+    obs[i].lastY = obs[i].y;
+    obs[i].wasDrawn = true;
+  }
+
+  drawCarSprite(car_x, CAR_Y, ILI9341_CYAN);
+  last_car_x = car_x;
+
+  if (car_score != last_car_score) {
+    tft.fillRect(0, 0, ROAD_X - 4, 90, COR_GRAMA);
+    tft.setTextColor(COR_TEXTO, COR_GRAMA);
+    tft.setTextSize(2);
+    tft.setCursor(4, 15);
+    tft.print("PONTOS");
+    tft.setTextSize(3);
+    tft.setCursor(4, 40);
+    tft.print(car_score);
+    last_car_score = car_score;
+  }
+}
+
+void car_game_loop() {
+  unsigned long now = millis();
+
+  // Pausa ao manter os dois botões pressionados.
+  if (navigateButton.stablePressed && selectButton.stablePressed) {
+    if (bothPressedAt == 0) bothPressedAt = now;
+    if (now - bothPressedAt >= 250UL) {
+      navigateButton.longHandled = true;
+      selectButton.longHandled = true;
+      bothPressedAt = 0;
+      pauseGame();
+      return;
+    }
+  } else {
+    bothPressedAt = 0;
+  }
+
+  if (now - lastCarUpdate < 30UL) return;
+  lastCarUpdate = now;
+
+  if (digitalRead(pinoBotaoNavegar) == LOW) car_x -= CAR_SPEED;
+  if (digitalRead(pinoBotaoSelect) == LOW) car_x += CAR_SPEED;
+
+  if (car_x < ROAD_X + 4) car_x = ROAD_X + 4;
+  if (car_x > ROAD_X + ROAD_W - 4 - CAR_W) {
+    car_x = ROAD_X + ROAD_W - 4 - CAR_W;
+  }
+
+  // Pontos por tempo, sem perder contagem se um quadro atrasar.
+  if (now - carScoreTick >= 500UL) {
+    unsigned long gainedPoints = (now - carScoreTick) / 500UL;
+    carScoreTick += gainedPoints * 500UL;
+    car_score += (int)gainedPoints;
+  }
+
+  // Acelera a cada cinco segundos até a velocidade máxima.
+  if (now - lastSpeedUpTime >= 5000UL) {
+    lastSpeedUpTime = now;
+    if (car_speed < 12) {
+      car_speed += 2;
+      if (car_speed > 12) car_speed = 12;
+    }
+    if (obsSpawnInterval > 400) {
+      obsSpawnInterval -= 150;
+      if (obsSpawnInterval < 400) obsSpawnInterval = 400;
+    }
+  }
+
+  // Gera obstáculos em três faixas, mantendo espaço para reagir.
+  if (now - lastObsSpawn >= (unsigned long)obsSpawnInterval) {
+    int minGap = CAR_H + 30 + car_speed * 6;
+    bool gapOk = true;
+
+    for (int i = 0; i < MAX_OBS; i++) {
+      if (obs[i].active && obs[i].y < minGap) gapOk = false;
+    }
+
+    if (gapOk) {
+      for (int i = 0; i < MAX_OBS; i++) {
+        if (obs[i].active) continue;
+
+        static int lastSection = -1;
+        int section = random(0, 3);
+        if (section == lastSection) {
+          section = (section + 1 + random(0, 2)) % 3;
+        }
+        int sectionWidth = ROAD_W / 3;
+        int minX = ROAD_X + 4 + section * sectionWidth;
+        int maxX = minX + sectionWidth - CAR_W - 4;
+        int roadMaxX = ROAD_X + ROAD_W - 4 - CAR_W;
+        if (maxX > roadMaxX) maxX = roadMaxX;
+        if (maxX < minX) maxX = minX;
+
+        obs[i].active = true;
+        obs[i].x = random(minX, maxX + 1);
+        obs[i].y = -(CAR_H * 2);
+        obs[i].color = obsColors[random(0, 4)];
+        lastObsSpawn = now;
+        lastSection = section;
+        break;
+      }
+    }
+  }
+
+  // Gera moedas em posições que permanecem dentro da pista.
+  if (now - lastCoinSpawn >= (unsigned long)coinSpawnInterval) {
+    lastCoinSpawn = now;
+    for (int i = 0; i < MAX_COINS; i++) {
+      if (coins[i].active) continue;
+
+      int coinSection = random(0, 3);
+      int sectionWidth = ROAD_W / 3;
+      int minX = ROAD_X + 6 + coinSection * sectionWidth;
+      int maxX = minX + sectionWidth - 12;
+      int roadMaxX = ROAD_X + ROAD_W - 4 - 8;
+      if (maxX > roadMaxX) maxX = roadMaxX;
+      if (maxX < minX) maxX = minX;
+
+      coins[i].active = true;
+      coins[i].x = random(minX, maxX + 1);
+      coins[i].y = -20;
+      break;
+    }
+  }
+
+  // Move moedas e concede pontos ao coletá-las.
+  for (int i = 0; i < MAX_COINS; i++) {
+    if (!coins[i].active) continue;
+
+    coins[i].y += car_speed;
+    if (coins[i].y > SCREEN_HEIGHT) {
+      coins[i].active = false;
+      continue;
+    }
+
+    if (car_x < coins[i].x + 8 &&
+        car_x + CAR_W > coins[i].x &&
+        CAR_Y < coins[i].y + 8 &&
+        CAR_Y + CAR_H > coins[i].y) {
+      coins[i].active = false;
+      car_score += 5;
+      tone(pinoBuzzer, 1500, 40);
+    }
+  }
+
+  // Move obstáculos e encerra a partida ao colidir.
+  for (int i = 0; i < MAX_OBS; i++) {
+    if (!obs[i].active) continue;
+
+    obs[i].y += car_speed;
+    if (obs[i].y > SCREEN_HEIGHT) {
+      obs[i].active = false;
+      continue;
+    }
+
+    if (car_x + 2 < obs[i].x + CAR_W - 2 &&
+        car_x + CAR_W - 2 > obs[i].x + 2 &&
+        CAR_Y + 2 < obs[i].y + CAR_H - 2 &&
+        CAR_Y + CAR_H - 2 > obs[i].y + 2) {
+      car_game_over();
+      return;
+    }
+  }
+
+  int oldDashOffset = dashOffset;
+  dashOffset = (dashOffset + car_speed) % 40;
+  updateCarDisplay(oldDashOffset);
+}
+// ---------- DISPATCHER ----------
+void game_loop() {
+  if (currentGame == GAME_JUMP) jump_game_loop();
+  else if (currentGame == GAME_SHIP) ship_game_loop();
+  else car_game_loop();
+}
+
 // ================= AÇÕES =================
 
 void handleCurar() {
@@ -1310,11 +1755,12 @@ void setup() {
   pinMode(pinoBotaoNavegar, INPUT_PULLUP);
   pinMode(pinoBotaoSelect, INPUT_PULLUP);
   pinMode(pinoBuzzer, OUTPUT);
+  randomSeed(micros());
 
-  // Display ST7735 128x160
-  tft.initR(INITR_BLACKTAB);
+  // Display ILI9341 240x320
+  tft.begin();
 
-  // Paisagem: 160x128
+  // Paisagem: 320x240
   tft.setRotation(1);
 
   tft.fillScreen(COR_FUNDO);
@@ -1323,17 +1769,17 @@ void setup() {
 
   // Splash
   tft.fillScreen(COR_FUNDO);
-  tft.setTextSize(2);
-  tft.setTextColor(ST7735_CYAN, COR_FUNDO);
-  tft.setCursor(18, 35);
+  tft.setTextSize(3);
+  tft.setTextColor(ILI9341_CYAN, COR_FUNDO);
+  tft.setCursor(40, 70);
   tft.print("TAMAGOTCHI");
 
-  tft.setCursor(50, 65);
+  tft.setCursor(110, 130);
   tft.print("ESP32");
 
-  tft.setTextSize(1);
+  tft.setTextSize(2);
   tft.setTextColor(COR_TEXTO, COR_FUNDO);
-  tft.setCursor(17, 95);
+  tft.setCursor(40, 190);
   tft.print("EN ENERG FE FEL SA SAC");
 
   play_tone(500, 100);
@@ -1343,7 +1789,7 @@ void setup() {
 
   fullRedraw(true);
 
-  Serial.println("Tamagotchi ESP32 ST7735 iniciado!");
+  Serial.println("Tamagotchi ESP32 ILI9341 iniciado!");
 }
 
 // ================= LOOP =================
@@ -1391,14 +1837,16 @@ void loop() {
 
   switch (currentMode) {
     case MODE_TAMAGOTCHI:
-      if (navigateButton.shortPress) {
+      if (navigateButton.clicked()) {
+        navigateButton.consume();
         currentMode = MODE_MENU;
         menuInitialized = false;
         tone(pinoBuzzer, 400, 50);
         break;
       }
 
-      if (selectButton.pressEvent) {
+      if (selectButton.clicked()) {
+        selectButton.consume();
         enterClockSetup();
         break;
       }
@@ -1432,8 +1880,7 @@ void loop() {
       break;
 
     case MODE_GAME:
-      if (currentGame == GAME_SHIP) ship_game_loop();
-      else game_loop();
+      game_loop();
       break;
 
     case MODE_GAME_SELECT:
@@ -1441,19 +1888,23 @@ void loop() {
       break;
 
     case MODE_GAME_PAUSED:
-      if (navigateButton.shortPress) {
+      if (navigateButton.clicked()) {
+        navigateButton.consume();
         currentMode = MODE_TAMAGOTCHI;
         fullRedraw(true);
-      } else if (selectButton.pressEvent) {
+      } else if (selectButton.clicked()) {
+        selectButton.consume();
         resumeGame();
       }
       break;
 
     case MODE_GAME_OVER:
-      if (navigateButton.shortPress) {
+      if (navigateButton.clicked()) {
+        navigateButton.consume();
         currentMode = MODE_TAMAGOTCHI;
         fullRedraw(true);
-      } else if (selectButton.pressEvent) {
+      } else if (selectButton.clicked()) {
+        selectButton.consume();
         startGame();
       }
       break;
